@@ -274,7 +274,7 @@ body{
 }
 .print-btn:hover{background:var(--ochs-blue);color:#fff}
 
-/* ── FORMSUBMIT NOTICE ── */
+/* ── SETUP NOTICE ── */
 .setup-notice{
   background:linear-gradient(135deg,rgba(0,195,220,0.06),rgba(0,195,220,0.02));
   border:1px solid rgba(0,195,220,0.25);
@@ -327,10 +327,10 @@ body{
     <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
   </div>
 
-  <!-- FORMSUBMIT ACTIVATION NOTICE -->
+  <!-- GOOGLE SHEETS SETUP NOTICE -->
   <div class="setup-notice" id="setupNotice">
-    <strong>✉ Email notifications active</strong>
-    Submissions will be sent to <strong style="color:var(--ochs-blue);display:inline">nabras.almahrami@gmail.com</strong> via FormSubmit. On your first submission, check your inbox for a confirmation/activation email from FormSubmit to enable delivery.
+    <strong>⚙ Google Sheets setup required</strong>
+    To save submissions directly to your Google Sheet (including signatures), deploy the Apps Script and paste the URL into the script below. See the <strong>SETUP_INSTRUCTIONS.txt</strong> file for step-by-step instructions. Until then, data will download as a CSV file.
   </div>
 
   <form id="mainForm" novalidate>
@@ -534,10 +534,14 @@ body{
 </div><!-- /wrap -->
 
 <script>
-// ── FORMSUBMIT CONFIGURATION ──
-const ADMIN_EMAIL = 'nabras.almahrami@gmail.com';
-// Using FormSubmit.co — no API keys needed.
-// On first submission, check your inbox to confirm your email address.
+// ── GOOGLE SHEETS CONFIGURATION ──
+// Paste your Google Apps Script Web App URL below after deploying the script.
+// See the SETUP_INSTRUCTIONS.txt file for steps.
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxxNoZhirhneKSU0tJvz9xxj-SlfeC2OrcgWQksmhFLWD1H_0HuFwcOS2fivIBfypzR5g/exec';
+const scriptConfigured  = !GOOGLE_SCRIPT_URL.includes('YOUR_');
+if (scriptConfigured) {
+  document.getElementById('setupNotice').style.display = 'none';
+}
 
 // ── SIGNATURE PAD ──
 let sigSigned = false;
@@ -663,64 +667,55 @@ document.getElementById('mainForm').addEventListener('submit', async function(e)
     email:        document.getElementById('email').value,
     phone:        document.getElementById('phone').value,
     involvement:  document.getElementById('involvement').value,
-    adminEmail:   ADMIN_EMAIL,
     signature:    sig,
     project:      'OCHS Innovation Portal',
   };
 
-  // Send email via FormSubmit.co
-  try {
-    const res = await fetch(`https://formsubmit.co/ajax/${ADMIN_EMAIL}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({
-        _subject: `NDA Registration — ${data.fullName} (${data.organization})`,
-        'Submission Time': data.timestamp,
-        'Meeting Date': data.meetDate,
-        'Meeting Time': data.meetTime,
-        'Platform': data.meetPlatform,
-        'Meeting Reference': data.meetRef,
-        'Full Name': data.fullName,
-        'Job Title': data.jobTitle,
-        'Department': data.department,
-        'Organization': data.organization,
-        'Email': data.email,
-        'Phone': data.phone,
-        'Involvement': data.involvement,
-        'Project': data.project,
-        _template: 'table'
-      })
-    });
-    if (!res.ok) throw new Error('FormSubmit error');
-  } catch (err) {
-    console.error('Email send error:', err);
-    fallbackCSV(data);
+  // Send data to Google Sheets via Apps Script
+  let saved = false;
+  if (scriptConfigured) {
+    try {
+      const res = await fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      saved = true;
+    } catch (err) {
+      console.error('Google Sheets save error:', err);
+    }
   }
 
-  showSuccess(data, ts);
+  if (!saved && !scriptConfigured) {
+    // Fallback: download CSV if script not configured
+    const headers = ['Timestamp','Meeting Date','Meeting Time','Platform','Meeting Ref','Full Name','Job Title','Department','Organization','Email','Phone','Involvement'];
+    const values  = [data.timestamp, data.meetDate, data.meetTime, data.meetPlatform, data.meetRef, data.fullName, data.jobTitle, data.department, data.organization, data.email, data.phone, data.involvement];
+    const csv = headers.join(',') + '\n' + values.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
+    const a   = document.createElement('a');
+    a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    a.download = `NDA_${data.fullName.replace(/\s+/g,'_')}_${data.meetDate}.csv`;
+    a.click();
+  }
+
+  showSuccess(data, ts, saved);
 });
 
-function fallbackCSV(d) {
-  const headers = ['Timestamp','Meeting Date','Meeting Time','Platform','Meeting Ref','Full Name','Job Title','Department','Organization','Email','Phone','Involvement'];
-  const values  = [d.timestamp, d.meetDate, d.meetTime, d.meetPlatform, d.meetRef, d.fullName, d.jobTitle, d.department, d.organization, d.email, d.phone, d.involvement];
-  const csv = headers.join(',') + '\n' + values.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',');
-  const a   = document.createElement('a');
-  a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-  a.download = `NDA_${d.fullName.replace(/\s+/g,'_')}_${d.meetDate}.csv`;
-  a.click();
-}
-
-function showSuccess(d, ts) {
+function showSuccess(d, ts, saved) {
   document.getElementById('mainForm').style.display = 'none';
   document.getElementById('successScreen').style.display = 'block';
   document.getElementById('progressFill').style.width = '100%';
   document.getElementById('pctLabel').textContent = '100%';
   window.scrollTo({ top: 0, behavior: 'smooth' });
 
+  const saveStatus = saved
+    ? '<br><strong style="color:#0D7C66">✓ Data saved to Google Sheets (including signature)</strong>'
+    : '<br><strong style="color:#c0392b">⚠ Google Script not configured — CSV downloaded as backup</strong>';
+
   document.getElementById('successTs').innerHTML =
     `<strong>Submitted:</strong> ${ts}<br>
      <strong>Meeting:</strong> ${d.meetDate} at ${d.meetTime} via ${d.meetPlatform}<br>
-     <strong>Reference:</strong> ${d.meetRef}`;
+     <strong>Reference:</strong> ${d.meetRef}${saveStatus}`;
 
   document.getElementById('successSummary').innerHTML =
     `<strong>Participant:</strong> ${d.fullName}<br>
